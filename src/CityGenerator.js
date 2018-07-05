@@ -1,17 +1,16 @@
+
 let CHUNK_LENGTH = 250;
 let MAX_ALLEY_WIDTH = 5;
+let NUM_STARS = 10000;
 
 let loader;
 let car;
 let starField;
+let dirLight;
 
 let drawPosX = [0, 0];
 let drawGroundX = 0;
 let availableBuildings = [];
-let usedBuildings = [];
-
-
-let dirLight;
 
 init();
 animate();
@@ -40,9 +39,6 @@ function init() {
 
     loader = new THREE.TextureLoader();
 
-    usedBuildings[0] = [];
-    usedBuildings[1] = [];
-
     addLights();
     loadMaterials();
     addStars();
@@ -54,10 +50,13 @@ function init() {
     window.addEventListener('resize', onWindowResize, false);
 }
 
+/**
+ * Creates and randomly places NUM_STARS vertices to serve as stars.
+ */
 function addStars(){
     let starsGeometry = new THREE.Geometry();
 
-    for ( let i = 0; i < 10000; i++ ) {
+    for ( let i = 0; i < NUM_STARS; i++ ) {
         let star = new THREE.Vector3();
         star.x = THREE.Math.randFloatSpread( 80000 );
         star.y = THREE.Math.randFloatSpread( 60000) + 20000;
@@ -72,20 +71,41 @@ function addStars(){
     scene.add(starField);
 }
 
+/**
+ * Adds a car in
+ */
 function addCar(){
-    let spriteMap = loader.load(
-        './Textures/Car.png',
+    loader.load(
+        './Textures/car_texture.jpg',
         function (texture) {
-            let spriteMaterial = new THREE.SpriteMaterial( { map: texture, color: 0xffffff } );
-            car = new THREE.Sprite( spriteMaterial );
-            car.position.z = 0;
-            car.position.y = 4.25;
-            car.position.x = 100;
-
-            dirLight.target = car;
-            car.scale.set(11, 4, 1);
-            scene.add( car );
-            console.log("Car added. Position is " + car.position.x + " " + car.position.y + " " + car.position.z);
+            let objLoader = new THREE.OBJLoader();
+            objLoader.setPath('./Models/');
+            objLoader.load('car.obj', function (object) {
+                    object.traverse(function (child) {
+                        if (child instanceof THREE.Mesh) {
+                            child.castShadow = true;
+                            child.receiveShadow = true;
+                            child.material.map = texture;
+                        }
+                    });
+                    object.position.y = -.65;
+                    object.position.z = -5;
+                    object.position.x = 100;
+                    object.scale.z = 10;
+                    object.scale.x = 10;
+                    object.scale.y = 10;
+                    object.rotateY(0);
+                    object.castShadow = true;
+                    object.receiveShadow = true;
+                    scene.add(object);
+                    car = object;
+                    dirLight.target = car;
+                }, function (xhr) {
+                    console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+                },
+                function (xhr) {
+                    console.log('An error happened');
+                });
         },
         function (xhr) {
             console.log((xhr.loaded / xhr.total * 100) + '% loaded');
@@ -96,10 +116,10 @@ function addCar(){
 }
 
 /**
- * Adds the hemisphere and direcitonal light used for lighting the city
+ * Adds an ambient and directional light
  */
 function addLights(){
-    let ambientLight = new THREE.AmbientLight(0xeeeeff, 1);
+    let ambientLight = new THREE.AmbientLight(0xeeeeff, .5);
     scene.add(ambientLight);
 
     dirLight = new THREE.DirectionalLight (0xffffff, 1.5);
@@ -116,20 +136,10 @@ function addLights(){
     dirLight.shadow.camera.right = 100;
     dirLight.shadowBias = 0.02;
     scene.add(dirLight);
-
-
-    var helper = new THREE.CameraHelper( dirLight.shadow.camera );
-    scene.add( helper );
-
-
 }
 
 /**
- * Adds a 'chunk' of buildings.
- * @param {int} startX - The x position for the 'lower-left' corner of this chunk.
- *                       The chunk will generate in the positive direction away from this point.
- * @param {int} startZ - The z position for the 'lower-left' corner of this chunk.
- *                       The chunk will generate in the positive direction away from this point.
+ * Adds ground and buildings in the direction of travel(pos X) to CHUNK_LENGTH distance
  */
 function buildCity(){
     let startX = drawPosX[0];
@@ -140,7 +150,7 @@ function buildCity(){
         building.position.y = building._height / 2;
         building.position.z = -35;
         scene.add(building);
-        usedBuildings[0].push(building);
+        availableBuildings.push(building);
 
         drawPosX[0] += building._width + alleyWidth();
     }
@@ -151,7 +161,7 @@ function buildCity(){
         building.position.y = building._height / 2;
         building.position.z = -55;
         scene.add(building);
-        usedBuildings[1].push(building);
+        availableBuildings.push(building);
         drawPosX[1] += building._width + alleyWidth();
     }
 
@@ -174,21 +184,6 @@ function buildCity(){
 
         // Store working position
         drawGroundX += CHUNK_LENGTH;
-    }
-}
-
-function cleanupBuildings(){
-    if (!car){
-        return;
-    }
-
-    let leftBorder = car.position.x - 250;
-    while (usedBuildings[0][0].position.x < leftBorder){
-        availableBuildings.push(usedBuildings[0].shift());
-    }
-
-    while (usedBuildings[1][1].position.x < leftBorder){
-        availableBuildings.push(usedBuildings[1].shift());
     }
 }
 
@@ -285,9 +280,6 @@ function getRoad(posX, posZ){
 /**
  * Loads and caches the commonly used meshes, materials, and textures needed to draw the
  * city.
- * Noise function used to mottle ground texture comes
- * from https://github.com/ashima/webgl-noise, (C) Ashima Arts and Stefan Gustavson.
- * Used with permission.
  */
 function loadMaterials(){
 
@@ -313,28 +305,27 @@ function loadMaterials(){
     renderer._microCache.set('curbGeo', geometry);
 }
 
-
 /**
  * Randomly generates a building depth
  */
 function randomDepth(){
-    // Min depth is 1, Max depth is ~3.
     return (Math.random() * 2 + 1) * 8;
 }
+
 /**
  * Randomly generates a building width
  */
 function randomWidth(){
-    // Min width is 1, Max width is 3
     return (Math.random() * 2 + 4) * 10;
 }
+
 /**
  * Randomly generates a building height. Results are unevenly distributed,
  * with taller buildings appearing somewhat less frequently.
  */
 function randomHeight(){
     var rand = Math.random() * 10;
-    // 90% of the time building height is between 20 and 100
+    // 90% of the time building height is between 12 and 24
     if (rand <= 9){
         return 12 * (rand + 1);
     }
@@ -351,16 +342,26 @@ function onWindowResize(){
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
 }
+
+/**
+ * Moves the car, starfield, directional light, and camera in
+ * the direction of travel (pos X).
+ */
+function move(){
+    dirLight.position.x += .35;
+    if (car) {
+        car.position.x += .35;
+    }
+    camera.translateX(.35);
+    starField.position.x += .35;
+}
+
 /**
  * Updates the scene. Runs at a maximum of 60 times per second.
  */
-function animate(){
+function animate() {
     buildCity();
-    cleanupBuildings();
+    move();
     requestAnimationFrame(animate);
-    dirLight.position.x += .35;
-    car.position.x += .35;
-    camera.translateX(.35);
-    starField.position.x += .35;
     renderer.render(scene, camera);
 }
