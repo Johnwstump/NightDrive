@@ -2,6 +2,7 @@
 let CHUNK_LENGTH = 250;
 let MAX_ALLEY_WIDTH = 5;
 let NUM_STARS = 10000;
+let BUILDING_POOL = 25;
 
 let loader;
 let car;
@@ -200,28 +201,74 @@ function alleyWidth(){
  * and adds them to availableBuildings
  */
 function generateBuildings(){
-    let building;
-
-    for (let i = 0; i < 25; i++){
+    for (let i = 0; i < BUILDING_POOL; i++){
+        let buildingGroup = new THREE.Group();
         let height = randomHeight();
         let width = randomWidth();
+        let depth = randomDepth();
 
-        // Standard cube building
-        geometry = new THREE.BoxBufferGeometry( width, height, randomDepth());
+        let geometry = new THREE.BoxBufferGeometry( width, height, depth);
         let r = Math.floor(Math.random() * 8);
-        material = new THREE.MeshLambertMaterial({color: new THREE.Color("rgb(" + r + "%, " + r + "%, " + r + "%)")});
-        building = new THREE.Mesh(geometry, material);
-
-        building._width = width;
-        building._height = height;
-
+        let material = new THREE.MeshLambertMaterial({color: new THREE.Color("rgb(" + r + "%, " + r + "%, " + r + "%)")});
+        let building = new THREE.Mesh(geometry, material);
         building.castShadow = true;
         building.receiveShadow = true;
+        buildingGroup.add(building);
 
-        availableBuildings.push(building);
+
+        // Select a semi-random window height and vertical spacing
+        let windowHeight = Math.random() * 3 + 2;
+        let verticalWindowGap = (Math.random() * 2) + 2;
+
+        // Select a semi-random window width and horizontal spacing
+        let windowWidth = Math.random() * 3 + 5;
+        let horizontalWindowGap = (Math.random() * 2) + 2;
+
+        // Calculate balanced vertical margins for the current building
+        let numRows = Math.floor(height / (windowHeight + verticalWindowGap));
+        let rowRemainder = height - ((windowHeight + verticalWindowGap) * numRows);
+
+        // Calculate balanced horizontal margins for the current building
+        let numCols = Math.floor(width / (windowWidth + horizontalWindowGap));
+        let colRemainder = width - ((windowWidth + horizontalWindowGap) * numCols);
+
+        // Set the initial y position
+        // - height/2 sets to zero, windowHeight/2 starts at -x side of window, rowRemainder / 2 centers
+        let yPos = - (height / 2) + (windowHeight / 2) + (rowRemainder / 2) + 1;
+
+        // Pick a random value for window color for this building.
+        r = Math.floor(Math.random() * 45 + 15);
+        let windowMaterial = new THREE.MeshLambertMaterial({color: new THREE.Color("rgb(" + r + "%, " + r + "%, " + r + "%)")});
+        // Brighten color for 'lit' windows.
+        r += 40;
+        let brightWindowMaterial = new THREE.MeshLambertMaterial({color: new THREE.Color("rgb(" + r + "%, " + r + "%, " + r + "%)")});
+
+        // Place windows
+        while (yPos + (windowHeight / 2) < height / 2){
+            let xPos = - (width / 2) + (windowWidth / 2) + (colRemainder / 2) + 1;
+            while ((xPos + windowWidth / 2) < width / 2){
+                geometry = new THREE.PlaneBufferGeometry( windowWidth, windowHeight, 1);
+                let window = new THREE.Mesh(geometry, Math.random() > .5 ? brightWindowMaterial : windowMaterial);
+                window.position.z = depth / 2;
+                window.position.x = xPos;
+                window.position.y = yPos;
+                buildingGroup.add(window);
+                xPos += windowWidth + horizontalWindowGap;
+            }
+            yPos += verticalWindowGap + windowHeight;
+        }
+
+        buildingGroup._width = width;
+        buildingGroup._height = height;
+
+        buildingGroup.castShadow = true;
+        buildingGroup.receiveShadow = true;
+
+        availableBuildings.push(buildingGroup);
     }
 
 }
+
 
 /**
  * Creates a sidewalk plane of CHUNK_LENGTH width and places it
@@ -283,7 +330,7 @@ function getRoad(posX, posZ){
  */
 function loadMaterials(){
 
-    material = new THREE.MeshLambertMaterial({color: new THREE.Color("rgb(12%, 12%, 12%)")});
+    let material = new THREE.MeshLambertMaterial({color: new THREE.Color("rgb(12%, 12%, 12%)")});
     renderer._microCache.set('sidewalk', material);
 
     material = new THREE.MeshLambertMaterial({color: new THREE.Color("rgb(10%, 10%, 10%)")});
@@ -293,7 +340,7 @@ function loadMaterials(){
     renderer._microCache.set('road', material);
 
     // Load ground geometry
-    geometry = new THREE.PlaneBufferGeometry(CHUNK_LENGTH, 65, 1, 3);
+    let geometry = new THREE.PlaneBufferGeometry(CHUNK_LENGTH, 65, 1, 3);
     geometry.rotateX( - Math.PI / 2);
     renderer._microCache.set('sidewalkGeo', geometry);
 
@@ -348,12 +395,12 @@ function onWindowResize(){
  * the direction of travel (pos X).
  */
 function move(){
-    dirLight.position.x += .35;
+    dirLight.position.x += .25;
     if (car) {
-        car.position.x += .35;
+        car.position.x += .25;
     }
-    camera.translateX(.35);
-    starField.position.x += .35;
+    camera.translateX(.25);
+    starField.position.x += .25;
 }
 
 /**
