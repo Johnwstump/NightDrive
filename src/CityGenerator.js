@@ -2,16 +2,29 @@
 let CHUNK_LENGTH = 250;
 let MAX_ALLEY_WIDTH = 5;
 let NUM_STARS = 10000;
-let BUILDING_POOL = 25;
+let BUILDING_POOL = 45;
+let WINDOWS_MARGIN = 1;
 
 let loader;
 let car;
 let starField;
 let dirLight;
 
-let drawPosX = [0, 0];
+let drawPosX = [0, 0, 0];
 let drawGroundX = 0;
 let availableBuildings = [];
+let wheels = [];
+
+class Window {
+  constructor(height, verticalGap, width, horizontalGap, windowMaterial, brightMaterial) {
+    this.height = height;
+	this.verticalGap = verticalGap;
+	this.width = width;
+	this.horizontalGap = horizontalGap;
+	this.material = windowMaterial;
+	this.brightMaterial = brightMaterial;
+  }
+}
 
 init();
 animate();
@@ -73,14 +86,14 @@ function addStars(){
 }
 
 /**
- * Adds a car in
+ * Loads the car model and adds it to the scene
  */
 function addCar(){
     loader.load(
-        './Textures/car_texture.jpg',
+        'http://192.168.1.177:8081/NightDrive/Textures/car_texture.jpg',
         function (texture) {
             let objLoader = new THREE.OBJLoader();
-            objLoader.setPath('./Models/');
+            objLoader.setPath('http://192.168.1.177:8081/NightDrive/Models/');
             objLoader.load('car.obj', function (object) {
                     object.traverse(function (child) {
                         if (child instanceof THREE.Mesh) {
@@ -90,7 +103,7 @@ function addCar(){
                         }
                     });
                     object.position.y = -.65;
-                    object.position.z = -5;
+                    object.position.z = 5;
                     object.position.x = 100;
                     object.scale.z = 10;
                     object.scale.x = 10;
@@ -99,8 +112,26 @@ function addCar(){
                     object.castShadow = true;
                     object.receiveShadow = true;
                     scene.add(object);
-                    car = object;
-                    dirLight.target = car;
+					
+					car = object;
+					
+					// I spent about two hours here trying to add headlights to this thing,
+					// and in the process lost my will to live.
+					// R.I.P. Sanity
+					
+					// Find and store the wheels so we can rotate them as we
+					// move the scene
+					object.traverse(function (child) {
+                        if (child.name.includes("Cylinder")) {
+                            let wheel =child;
+
+							var box = new THREE.Box3().setFromObject( wheel );
+							box.center( wheel.position );
+							
+							wheel.geometry.center();
+							wheels.push(wheel);
+                        }
+                    });
                 }, function (xhr) {
                     console.log((xhr.loaded / xhr.total * 100) + '% loaded');
                 },
@@ -125,17 +156,21 @@ function addLights(){
 
     dirLight = new THREE.DirectionalLight (0xffffff, 1.5);
     dirLight.color.setHSL(0.1, 1, 0.95);
-    dirLight.position.set(100, 1000, -500);
     dirLight.castShadow = true;
     dirLight.shadow.camera.near = 5;
-    dirLight.shadow.camera.far = 2000;
-    dirLight.shadow.camera.fov = 50;
+    dirLight.shadow.camera.far = 8000;
+    dirLight.shadow.camera.fov = 120;
 
-    dirLight.shadow.camera.top = 75;
-    dirLight.shadow.camera.bottom = -75;
+    dirLight.shadow.camera.top = 110;
+    dirLight.shadow.camera.bottom = -110;
     dirLight.shadow.camera.left = -100;
     dirLight.shadow.camera.right = 100;
     dirLight.shadowBias = 0.02;
+	
+	const targetObject = new THREE.Object3D();
+	scene.add(targetObject);
+
+	dirLight.target = targetObject;
     scene.add(dirLight);
 }
 
@@ -150,6 +185,7 @@ function buildCity(){
         building.position.x = drawPosX[0] + building._width / 2;
         building.position.y = building._height / 2;
         building.position.z = -35;
+		
         scene.add(building);
         availableBuildings.push(building);
 
@@ -164,23 +200,35 @@ function buildCity(){
         scene.add(building);
         availableBuildings.push(building);
         drawPosX[1] += building._width + alleyWidth();
+		
+    }
+	
+	while (drawPosX[2] < drawPosX[0]){
+        let building = availableBuildings.shift();
+        building.position.x = drawPosX[2] + building._width / 2;
+        building.position.y = building._height / 2;
+        building.position.z = -75;
+        scene.add(building);
+        availableBuildings.push(building);
+        drawPosX[2] += building._width + alleyWidth();
+		
     }
 
     if (drawGroundX < startX + CHUNK_LENGTH){
         // Draw the sidewalk
-        let sidewalk = getSidewalk(drawGroundX);
+        let sidewalk = buildSidewalk(drawGroundX);
         scene.add(sidewalk);
 
         // Draw the curb between the sidewalk and road
-        let curb = getCurb(drawGroundX);
+        let curb = buildCurb(drawGroundX);
         scene.add(curb);
 
         // Draw the road in front of the buildings
-        let road = getRoad(drawGroundX, 0);
+        let road = buildRoad(drawGroundX, 0);
         scene.add(road);
 
         // Draw the road behind the buildings
-        road = getRoad(drawGroundX, -90);
+        road = buildRoad(drawGroundX, -90);
         scene.add(road);
 
         // Store working position
@@ -197,17 +245,44 @@ function alleyWidth(){
 }
 
 /**
- * Generates a random set of buildings to be reused when building city
+* Generates a semi-randome Window object which will serve
+* as a pattern for generating window meshes
+* @Returns a populated instance of Window
+*/
+function createWindowPattern(){
+	// Select a semi-random window height and vertical spacing
+	let windowHeight = Math.random() * 3 + 2;
+	let verticalWindowGap = Math.random() * 2 + 2;
+
+	// Select a semi-random window width and horizontal spacing
+	let windowWidth = Math.random() * 5 + 2;
+	let horizontalWindowGap = Math.random() * 2 + 2;
+	
+	// Pick a random value for window color for this building.
+	r = Math.floor(Math.random() * 45 + 15);
+	let windowMaterial = new THREE.MeshLambertMaterial({color: new THREE.Color("rgb(" + r + "%, " + r + "%, " + r + "%)")});
+	// Brighten color for 'lit' windows.
+	r += 60;
+	let brightWindowMaterial = new THREE.MeshLambertMaterial({color: new THREE.Color("rgb(" + r + "%, " + r + "%, " + r + "%)")});
+	
+	const window = new Window(windowHeight, verticalWindowGap, windowWidth, horizontalWindowGap, windowMaterial, brightWindowMaterial);
+	
+	return window;
+}
+
+
+/**
+ * Generates a random set of buildings to be reused when building the city
  * and adds them to availableBuildings
  */
 function generateBuildings(){
     for (let i = 0; i < BUILDING_POOL; i++){
         let buildingGroup = new THREE.Group();
         let height = randomHeight();
-        let width = randomWidth();
+        let buildingWidth = randomWidth();
         let depth = randomDepth();
 
-        let geometry = new THREE.BoxBufferGeometry( width, height, depth);
+        let geometry = new THREE.BoxBufferGeometry( buildingWidth, height, depth);
         let r = Math.floor(Math.random() * 8);
         let material = new THREE.MeshLambertMaterial({color: new THREE.Color("rgb(" + r + "%, " + r + "%, " + r + "%)")});
         let building = new THREE.Mesh(geometry, material);
@@ -215,50 +290,56 @@ function generateBuildings(){
         building.receiveShadow = true;
         buildingGroup.add(building);
 
-
-        // Select a semi-random window height and vertical spacing
-        let windowHeight = Math.random() * 3 + 2;
-        let verticalWindowGap = (Math.random() * 2) + 2;
-
-        // Select a semi-random window width and horizontal spacing
-        let windowWidth = Math.random() * 3 + 5;
-        let horizontalWindowGap = (Math.random() * 2) + 2;
-
+		const window = createWindowPattern();
+		
         // Calculate balanced vertical margins for the current building
-        let numRows = Math.floor(height / (windowHeight + verticalWindowGap));
-        let rowRemainder = height - ((windowHeight + verticalWindowGap) * numRows);
+        let numRows = Math.floor(height / (window.height + window.verticalGap));
+        let rowRemainder = height - ((window.height + window.verticalGap) * numRows);
 
         // Calculate balanced horizontal margins for the current building
-        let numCols = Math.floor(width / (windowWidth + horizontalWindowGap));
-        let colRemainder = width - ((windowWidth + horizontalWindowGap) * numCols);
+        let numCols = Math.floor(buildingWidth / (window.width + window.horizontalGap));
+        let colRemainder = buildingWidth - ((window.width + window.horizontalGap) * numCols);
 
         // Set the initial y position
-        // - height/2 sets to zero, windowHeight/2 starts at -x side of window, rowRemainder / 2 centers
-        let yPos = - (height / 2) + (windowHeight / 2) + (rowRemainder / 2) + 1;
+        // - height/2 sets to zero, window.height/2 starts at -x side of window, rowRemainder / 2 centers
+        let yPos = - (height / 2) + (window.height / 2) + (rowRemainder / 2) + 1;
+		let firstRow = true;
+		
+        // Place windows while the next row won't exceed the height of the
+		// building mesh
+        while (yPos + (window.height / 2) < height / 2){
+			// -(buildingWidth / 2) gets us to the start (left side) of the building
+			let buildingLeftEdge = - (buildingWidth / 2);
+			
+			// The left edge, plus half the width of a window, plus half the 'column remainder', plus a minimum margin
+			// between the edge and the windows.
+            let xPos =  buildingLeftEdge + (window.width / 2) + (colRemainder / 2) + WINDOWS_MARGIN;
+			
+			let windowRow = createWindowRow(xPos, yPos, window, buildingWidth, depth);
+			
+			if (firstRow) {
+				firstRow = false;
+				
+				// We pick a random window to replace
+				let doorPosition = Math.random() * windowRow.length;
+				let removedWindow = windowRow.splice(doorPosition, 1);
+				
+				// Provided we found a window to remove (we should have)
+				if (removedWindow[0]){
+					// We generate a door in that position
+					let door = createDoor(removedWindow[0].position.x, removedWindow[0].position.y, removedWindow[0].position.z, window, height);
+					buildingGroup.add(door);
+				}
+			}
+			
+			// We add all the windows we generated to the building's group
+			windowRow.forEach(windowMesh => buildingGroup.add(windowMesh));
 
-        // Pick a random value for window color for this building.
-        r = Math.floor(Math.random() * 45 + 15);
-        let windowMaterial = new THREE.MeshLambertMaterial({color: new THREE.Color("rgb(" + r + "%, " + r + "%, " + r + "%)")});
-        // Brighten color for 'lit' windows.
-        r += 40;
-        let brightWindowMaterial = new THREE.MeshLambertMaterial({color: new THREE.Color("rgb(" + r + "%, " + r + "%, " + r + "%)")});
-
-        // Place windows
-        while (yPos + (windowHeight / 2) < height / 2){
-            let xPos = - (width / 2) + (windowWidth / 2) + (colRemainder / 2) + 1;
-            while ((xPos + windowWidth / 2) < width / 2){
-                geometry = new THREE.PlaneBufferGeometry( windowWidth, windowHeight, 1);
-                let window = new THREE.Mesh(geometry, Math.random() > .5 ? brightWindowMaterial : windowMaterial);
-                window.position.z = depth / 2;
-                window.position.x = xPos;
-                window.position.y = yPos;
-                buildingGroup.add(window);
-                xPos += windowWidth + horizontalWindowGap;
-            }
-            yPos += verticalWindowGap + windowHeight;
+			// Adjust the Y position to the next row of windows
+            yPos += window.verticalGap + window.height;
         }
 
-        buildingGroup._width = width;
+        buildingGroup._width = buildingWidth;
         buildingGroup._height = height;
 
         buildingGroup.castShadow = true;
@@ -269,6 +350,43 @@ function generateBuildings(){
 
 }
 
+function createDoor(xPos, yPos, zPos, window, buildingHeight){
+	let doorWidth = Math.max(Math.min(Math.random() * 3 + 2, window.width), 3);
+	let doorHeight = 5;
+
+	geometry = new THREE.PlaneBufferGeometry( doorWidth, doorHeight, 1);
+	
+	let r = Math.floor(Math.random() * 45 + 15);
+	let doorMaterial = new THREE.MeshLambertMaterial({color: new THREE.Color("rgb(" + (r + 4) + "%, " + (r + 1) + "%, " +  r + "%)")});
+	
+	let doorMesh = new THREE.Mesh(geometry, doorMaterial);
+	
+	doorMesh.position.z = zPos;
+	doorMesh.position.x = xPos;
+	doorMesh.position.y = 0 - (buildingHeight / 2) + (doorHeight / 2);
+	
+	return doorMesh;
+}
+
+/**
+* Generates a row 
+*/
+function createWindowRow(xPos, yPos, window, width, depth){
+	let windowRow = [];
+
+	while ((xPos + window.width / 2) < width / 2){
+		geometry = new THREE.PlaneBufferGeometry( window.width, window.height, 1);
+		let windowMesh = new THREE.Mesh(geometry, Math.random() > .5 ? window.brightMaterial : window.material);
+		windowMesh.receiveShadow = true;
+		windowMesh.position.z = depth / 2;
+		windowMesh.position.x = xPos;
+		windowMesh.position.y = yPos;
+		windowRow.push(windowMesh);
+		xPos += window.width + window.horizontalGap;
+    }
+	
+	return windowRow;
+}
 
 /**
  * Creates a sidewalk plane of CHUNK_LENGTH width and places it
@@ -276,7 +394,7 @@ function generateBuildings(){
  * @param {int} posX - The x position for this sidewalk plane.
  * @returns The sidewalk mesh
  */
-function getSidewalk(posX){
+function buildSidewalk(posX){
     let material = renderer._microCache.get('sidewalk');
     let geometry = renderer._microCache.get('sidewalkGeo');
     let sidewalk = new THREE.Mesh(geometry, material);
@@ -295,7 +413,7 @@ function getSidewalk(posX){
  * @param {int} posX - The x position for this ground plane.
  * @param {int} posZ - The x position for this ground plane.
  */
-function getCurb(posX){
+function buildCurb(posX){
     let material = renderer._microCache.get('curb');
     let geometry = renderer._microCache.get('curbGeo');
     let curb = new THREE.Mesh(geometry, material);
@@ -312,11 +430,11 @@ function getCurb(posX){
  * @param {int} posX - The x position for this ground plane.
  * @param {int} posZ - The x position for this ground plane.
  */
-function getRoad(posX, posZ){
+function buildRoad(posX, posZ){
     let material = renderer._microCache.get('road');
     let geometry = renderer._microCache.get('roadGeo');
     let road = new THREE.Mesh(geometry, material);
-    road.castShadow = true;
+    road.castShadow = false;
     road.receiveShadow = true;
     road.position.y = -.5;
     road.position.z = posZ;
@@ -330,13 +448,13 @@ function getRoad(posX, posZ){
  */
 function loadMaterials(){
 
-    let material = new THREE.MeshLambertMaterial({color: new THREE.Color("rgb(12%, 12%, 12%)")});
+    let material = new THREE.MeshLambertMaterial({color: new THREE.Color("rgb(7%, 7%, 7%)")});
     renderer._microCache.set('sidewalk', material);
 
     material = new THREE.MeshLambertMaterial({color: new THREE.Color("rgb(10%, 10%, 10%)")});
     renderer._microCache.set('curb', material);
 
-    material = new THREE.MeshLambertMaterial({color: new THREE.Color("rgb(3%, 3%, 3%)")});
+    material = new THREE.MeshLambertMaterial({color: new THREE.Color("rgb(5%, 5%, 5%)")});
     renderer._microCache.set('road', material);
 
     // Load ground geometry
@@ -372,13 +490,12 @@ function randomWidth(){
  */
 function randomHeight(){
     var rand = Math.random() * 10;
-    // 90% of the time building height is between 12 and 24
+	
     if (rand <= 9){
         return 12 * (rand + 1);
     }
     else if (rand > 9){
-        // 10% of the time building height is between 3 and 18
-        return (Math.random() * 10 + 125);
+        return rand + 125;
     }
 }
 /**
@@ -395,11 +512,24 @@ function onWindowResize(){
  * the direction of travel (pos X).
  */
 function move(){
-    dirLight.position.x += .25;
-    if (car) {
-        car.position.x += .25;
-    }
+
     camera.translateX(.25);
+	
+	dirLight.position.copy(camera.position);
+
+	dirLight.position.x -= 1500;
+	dirLight.position.y += 2900;
+	dirLight.position.z -= 1500;
+	dirLight.target.position.x = camera.position.x + 50;
+	dirLight.shadow.camera.updateProjectionMatrix();
+
+	    if (car) {
+        car.position.x += .25;
+		wheels[0].rotateZ(-.1);
+		wheels[1].rotateZ(-.1);
+
+    }
+	
     starField.position.x += .25;
 }
 
